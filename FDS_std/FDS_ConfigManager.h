@@ -1,0 +1,223 @@
+/*
+		Copyright(C) 2025 Fordans
+						This source follows the GPL licence
+						See https://www.gnu.org/licenses/gpl-3.0.html for details
+*/
+
+#pragma once
+
+#include <fstream>
+#include <string>
+#include <map>
+#include <sstream>
+#include <stdexcept>
+
+class FDS_ConfigManager
+{
+public:
+	FDS_ConfigManager(const std::string& file_name = "settings.cfg");
+	~FDS_ConfigManager();
+
+    /*
+		The config file follows this structure:
+			[Filter]
+			key=value
+		Value types are provided as follows:
+			bool
+			int
+			float
+			std::string
+	*/
+	template<typename T>
+	void setConfig(const std::string& filter, const std::string& key, const T& value);
+
+	/*
+		The config file follows this structure:
+			[Filter]
+			key=value
+		Value types are provided as follows:
+			bool
+			int
+			float
+			std::string
+	*/
+	template<typename T>
+	T getConfig(const std::string& filter, const std::string& key);
+
+private:
+	void loadConfig();
+	void saveConfig();
+
+private:
+	std::string m_fileName;
+	std::map<std::string, std::map<std::string, std::string>> m_configData; // Filter -> (Key -> Value)
+	bool m_loaded = false;
+};
+
+FDS_ConfigManager::FDS_ConfigManager(const std::string& file_name) : m_fileName(file_name)
+{
+	loadConfig();
+}
+
+FDS_ConfigManager::~FDS_ConfigManager()
+{
+	saveConfig();
+}
+
+void FDS_ConfigManager::loadConfig()
+{
+	std::ifstream ifs(m_fileName);
+	if (!ifs.is_open())
+	{
+		// File doesn't exist, so create it.
+		return;
+	}
+
+	std::string currentFilter;
+	std::string line;
+
+	while (std::getline(ifs, line))
+	{
+		// Remove leading/trailing whitespace
+		size_t first = line.find_first_not_of(" \t\r\n");
+		if (first == std::string::npos)
+		{
+			continue; // Empty line.
+		}
+		line = line.substr(first);
+
+		size_t last = line.find_last_not_of(" \t\r\n");
+		line = line.substr(0, last + 1);
+
+		if (line.empty()) continue;
+
+		if (line[0] == '[')
+		{
+			// Filter line
+			size_t endBracket = line.find(']');
+			if (endBracket != std::string::npos)
+			{
+				currentFilter = line.substr(1, endBracket - 1);
+			}
+		}
+		else
+		{
+			// Key=Value line
+			size_t equalsPos = line.find('=');
+			if (equalsPos != std::string::npos)
+			{
+				std::string key = line.substr(0, equalsPos);
+				std::string value = line.substr(equalsPos + 1);
+
+				first = key.find_first_not_of(" \t\r\n");
+				key = key.substr(first);
+				last = key.find_last_not_of(" \t\r\n");
+				key = key.substr(0, last + 1);
+
+				first = value.find_first_not_of(" \t\r\n");
+				value = value.substr(first);
+				last = value.find_last_not_of(" \t\r\n");
+				value = value.substr(0, last + 1);
+
+				m_configData[currentFilter][key] = value;
+			}
+		}
+	}
+
+	ifs.close();
+	m_loaded = true;
+}
+
+void FDS_ConfigManager::saveConfig()
+{
+	std::ofstream ofs(m_fileName);
+	if (!ofs.is_open())
+	{
+		throw std::runtime_error("Failed to open: " + m_fileName);
+		return;
+	}
+
+	for (const auto& filterPair : m_configData)
+	{
+		ofs << "[" << filterPair.first << "]" << std::endl;
+		for (const auto& keyValuePair : filterPair.second)
+		{
+			ofs << keyValuePair.first << "=" << keyValuePair.second << std::endl;
+		}
+		ofs << std::endl;
+	}
+
+	ofs.close();
+}
+
+template<typename T>
+void FDS_ConfigManager::setConfig(const std::string& filter, const std::string& key, const T& value)
+{
+	std::stringstream ss;
+	ss << value;
+	m_configData[filter][key] = ss.str();
+}
+
+template<>
+void FDS_ConfigManager::setConfig(const std::string& filter, const std::string& key, const bool& value)
+{
+	m_configData[filter][key] = value ? "true" : "false";
+}
+
+
+template<typename T>
+T FDS_ConfigManager::getConfig(const std::string& filter, const std::string& key)
+{
+	auto filterIt = m_configData.find(filter);
+	if (filterIt == m_configData.end())
+	{
+		throw std::runtime_error("Filter not found: " + filter);
+	}
+
+	auto keyIt = filterIt->second.find(key);
+	if (keyIt == filterIt->second.end())
+	{
+		throw std::runtime_error("Key not found: " + key + " in filter: " + filter);
+	}
+
+	std::stringstream ss(keyIt->second);
+	T value;
+	ss >> value;
+
+	if (ss.fail())
+	{
+		throw std::runtime_error("Failed to convert value to requested type for key: " + key + " in filter: " + filter);
+	}
+
+	return value;
+}
+
+template<>
+bool FDS_ConfigManager::getConfig(const std::string& filter, const std::string& key)
+{
+	auto filterIt = m_configData.find(filter);
+	if (filterIt == m_configData.end())
+	{
+		throw std::runtime_error("Filter not found: " + filter);
+	}
+
+	auto keyIt = filterIt->second.find(key);
+	if (keyIt == filterIt->second.end())
+	{
+		throw std::runtime_error("Key not found: " + key + " in filter: " + filter);
+	}
+
+	std::string value = keyIt->second;
+	if (value == "true" || value == "True" || value == "1")
+	{
+		return true;
+	}
+	else if (value == "false" || value == "False" || value == "0")
+	{
+		return false;
+	}
+	else
+	{
+		throw std::runtime_error("Invalid boolean value for key: " + key + " in filter: " + filter);
+	}
+}
